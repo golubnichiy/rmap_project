@@ -6,24 +6,30 @@ library(rgdal)
 library(sp)
 library(raster)
 library(httr)
-library(jsonlite)
-library(ROpenWeatherMap)
+library(jsonlite) 
+library(ROpenWeatherMap) #OpenWeather
 library(RCurl)
-library(owmr)
+library(owmr) #OpenWeather
 library(js)
 library(dplyr)
+library(ggplot2)
+library(ropenaq)
+library(rworldmap)
+#testMazamaScience/actually works
+library(knitr)
+library(rmarkdown)
+library(AirSensor)
 library(MazamaSpatialUtils)
-
-#download.file("http://thematicmapping.org/downloads/TM_WORLD_BORDERS_SIMPL-0.3.zip", destfile = "world_shape_file.zip")
-#unzip("world_shape_file.zip")
-
-world_spdf = readOGR(dsn = getwd(), layer = "TM_WORLD_BORDERS_SIMPL-0.3")
-
-world_spdf$POP2005 = as.numeric(as.character(world_spdf$POP2005)) / 1000000 %>% round(2)
 
 #api_key = "c69997e98686ddc71077096dc80c5204"
 
 owmr_settings("c69997e98686ddc71077096dc80c5204") #open weather
+initializeMazamaSpatialUtils() #Mazama/ For interacting w/ data
+
+
+#installSpatialData("NaturalEarthAdm1")
+
+
 
 
 ui <- dashboardPage(
@@ -38,16 +44,13 @@ ui <- dashboardPage(
         menuSubItem("Earthquake Dark", tabName = "m_dark", icon = icon("map")),
         menuSubItem("Earthquake Heat", tabName = "m_heat", icon = icon("map")),
         menuSubItem("WorldPop", tabName = "m_chor", icon = icon("map")),
-        menuSubItem("WeatherMap", tabName = "m_test", icon = icon("map"))
+        menuSubItem("WeatherMap", tabName = "m_test", icon = icon("air")),
+        menuSubItem("AirQuality", tabName = "m_air", icon = icon("plus-square"))
       )
     )
   ),
 
   dashboardBody(
-    
-    textInput(inputId = "gorod", label = "Input your city"),
-    actionButton(textInput(inputId = "gorod", label = "Input your city"), "Button!"),
-    
     tabItems(
       tabItem(
         tabName = "m_osm",
@@ -71,9 +74,23 @@ ui <- dashboardPage(
         leafletOutput('chor_pop')
       ),
       tabItem(
+        textInput(inputId = "gorod", label = "Input your city", value = "Abakan"),
+        ###actionButton(textInput(inputId = "gorod", label = "Input your city"), "Button!"),
         tabName = "m_test",
         tags$style(type = 'text/css', '#test_map {height: calc(100vh - 200px) !important;}'),
         leafletOutput('test_map')
+      ),
+      tabItem(
+        tabName = "m_air",
+        tags$style(type = 'text/css', '#air_map {height: calc(100vh - 200px) !important;}'),
+        fluidRow(
+          box(plotOutput("plot1", height = 250)),
+          
+          box(leafletOutput("airmap", height = 250))
+        ),
+        fluidRow(
+          box(leafletOutput('mazamap', height = 500))
+        )
       )
     )
   )
@@ -92,14 +109,14 @@ server <- function(input, output, session){
     
     leaflet(data = quakes) %>% addTiles(group = "OpenStreetMap") %>%
       
-      addProviderTiles(providers$Esri.WorldStreetMap, options = tileOptions(minZoom = 0, maxZoom = 13), group = "Esri.WorldStreetMap") %>%
+      addProviderTiles(providers$Esri.WorldStreetMap, options = tileOptions(minZoom = 0, maxZoom = 7), group = "Esri.WorldStreetMap") %>%
       
-      addProviderTiles(providers$Esri.WorldImagery, options = tileOptions(minZoom = 0, maxZoom = 13), group = "Esri.WorldImagery") %>%
+      addProviderTiles(providers$Esri.WorldImagery, options = tileOptions(minZoom = 7, maxZoom = 13), group = "Esri.WorldImagery") %>%
       
       addCircles(radius = ~10^mag/10, weight = 1, color = ~pal(mag), fillColor = ~pal(mag), fillOpacity = 0.6, 
                  popup = ~as.character(mag), label = ~as.character(mag), group = "Points") %>%
       
-      addMarkers(lng = ~long, lat = ~lat, popup = ~as.character(mag), label = ~as.character(mag), group = "Markers") %>%
+      #addMarkers(lng = ~long, lat = ~lat, popup = ~as.character(mag), label = ~as.character(mag), group = "Markers") %>%
       
       addLayersControl(
         baseGroups = c("OpenStreetMap", "Esri.WorldStreetMap", "Esri.WorldImagery"),
@@ -169,7 +186,7 @@ server <- function(input, output, session){
       
       
       
-      #WEATHER PROBABLY
+      #WEATHER
       owm_data <- find_city(city = input$gorod, units = "metric") %>%
         owmr_as_tibble()
       map <- leaflet() %>% addProviderTiles(providers$CartoDB.DarkMatter, 
@@ -181,13 +198,78 @@ server <- function(input, output, session){
           owm_data,
           template = "<b>{{name}}</b>, {{temp}}°C",
           icon = owm_data$weather_icon
-        ) 
-      
-      
-      
+        )
     })
   })
+  ##############################
+  ###########AIR openAQ, In progress
   
+  
+  
+  
+  
+  output$airmap <- renderLeaflet({
+    
+    dataGeo <- aq_locations()
+    dataGeo <- filter(dataGeo, location != "Test Prueba", location != "PA")
+    
+    worldMap <- map_data(map="world")
+    
+    airmap <- ggplot() + geom_map(data=worldMap, map=worldMap,
+                            aes(map_id=region, x=long, y=lat),
+                             fill = "grey60")
+    
+  })  
+  
+  
+  #Still air, but what if in tabs?
+  
+  histdata <- rnorm(500)
+  
+  output$plot1 <- renderPlot({
+    data <- histdata[seq_len(5)]
+    hist(data)
+  })
+  
+  #Mazama air sensor
+  
+  output$mazamap <- renderLeaflet({
+    
+    
+    
+    #setArchiveBaseUrl("http://data.mazamascience.com/PurpleAir/v1")%>%
+    #initializeMazamaSpatialUtils() %>%
+    
+    #pas_load(
+      #datestamp = "YYYYmmddHH"
+      #baseUrl = "https://www.purpleair.com/json?all=true"
+      #datestamp = NULL
+      #pas_downloadParseRawData(baseUrl = "")
+    #) %>%
+    #    pas_leaflet()
+
+      #setSpatialDataDir('~/Data/Spatial')%>%
+    #initializeMazamaSpatialUtils()%>%
+    
+    
+    pas <- pas_createNew(
+      countryCodes = "RU",
+      includePWFSL = TRUE,
+      lookbackDays = 1,
+      baseUrl = "https://www.purpleair.com/json?all=true"
+      #hourlyData$temperature <- 5/9 * (temperature - 32) probably
+    )
+    
+      if ( interactive() ) {
+        pas %>%
+          #pas_filter(stateCode == "CA") %>%
+          pas_leaflet()
+      }
+    
+      
+  })
+  
+    
   
 }
 
